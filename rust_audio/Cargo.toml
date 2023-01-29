@@ -1,0 +1,12 @@
+[package]
+name = "rust_audio"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+# riff = "1.0.1"
+# wav = "1.0.0"
+# playback-rs = "0.2.5"
+cpal = "0.13.0"
