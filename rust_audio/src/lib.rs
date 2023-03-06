@@ -1,7 +1,7 @@
 use std::fs::File;
 use std::io::{Read, Seek, SeekFrom, Error};
-use std::str;
-use std::thread;
+use std::sync::{Arc, Mutex};
+use std::{str, thread};
 use std::time::Duration;
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 
@@ -26,10 +26,11 @@ pub struct AudioManager {
 // Если вектор пустой, то ничего не воспроизводится и буфер заполняется тишиной
 // Если векторе есть аудио клипы, буфер заполняется суммой сэмплов от каждого клипа по индивидуальной позиции
 // которая трекается для каждого клипа
-pub struct AudioPool {
+pub struct AudioSource {
     pub audio_clip: AudioClip,
     pub sample_position: i32,
-    pub is_loop: bool
+    pub is_loop: bool,
+    pub filename: String
 }
 
 impl AudioClip {
@@ -43,39 +44,39 @@ impl AudioClip {
 
         file.seek(SeekFrom::Start(0))?;
         file.read(&mut buffer_4)?;
-        println!("Chunk ID: {}", str::from_utf8(&buffer_4).unwrap());
+        //println!("Chunk ID: {}", str::from_utf8(&buffer_4).unwrap());
 
         file.seek(SeekFrom::Start(16))?;
         file.read(&mut buffer_4)?;
-        println!("Chunk size: {}", u32::from_le_bytes(buffer_4));
+        //println!("Chunk size: {}", u32::from_le_bytes(buffer_4));
 
         file.seek(SeekFrom::Start(22))?;
         file.read(&mut buffer_2)?;
-        println!("Channel numbers: {}", u16::from_le_bytes(buffer_2));
+        //println!("Channel numbers: {}", u16::from_le_bytes(buffer_2));
 
         file.seek(SeekFrom::Start(24))?;
         file.read(&mut buffer_4)?;
-        println!("Sample rate: {}", u32::from_le_bytes(buffer_4));
+        //println!("Sample rate: {}", u32::from_le_bytes(buffer_4));
 
         file.seek(SeekFrom::Start(32))?;
         file.read(&mut buffer_2)?;
-        println!(
-            "Количество байт для одного сэмпла, включая все каналы: {}",
-            u16::from_le_bytes(buffer_2)
-        );
+        // println!(
+        //     "Количество байт для одного сэмпла, включая все каналы: {}",
+        //     u16::from_le_bytes(buffer_2)
+        // );
 
         file.seek(SeekFrom::Start(34))?;
         file.read(&mut buffer_2)?;
-        println!("Bit per sample: {}", u16::from_le_bytes(buffer_2));
+        //println!("Bit per sample: {}", u16::from_le_bytes(buffer_2));
 
         file.seek(SeekFrom::Start(728))?;
         file.read(&mut buffer_4)?;
-        println!("Chunk ID: {}", str::from_utf8(&buffer_4).unwrap());
+        //println!("Chunk ID: {}", str::from_utf8(&buffer_4).unwrap());
 
         file.seek(SeekFrom::Start(732))?;
         file.read(&mut buffer_4)?;
         let data_chunk_size = u32::from_le_bytes(buffer_4);
-        println!("Количество байт в области данных: {}", data_chunk_size);
+        //println!("Количество байт в области данных: {}", data_chunk_size);
 
         let mut audio_clip = AudioClip {
             samples: Vec::new(),
@@ -99,17 +100,6 @@ impl AudioClip {
 
     }
 
-    // fn play(&self) {
-    //     unimplemented!()
-    // }
-
-    // fn pause(&self) {
-    //     unimplemented!()
-    // }
-
-    // fn stop(&self) {
-    //     unimplemented!()
-    // }
 }
 
 impl AudioManager {
@@ -172,4 +162,48 @@ impl AudioManager {
         Ok(())
            
     }
+
+    pub fn open_audio_stream(&self, audio_pool: Arc<Mutex<Vec<AudioSource>>>) -> std::io::Result<()> {        
+
+        let err_fn = |err| eprintln!("an error occurred on the output audio stream: {}", err);
+        let supported_config = self.device.default_output_config().unwrap();
+        let config = supported_config.into();  
+        let stream = self.device
+            .build_output_stream(
+                &config,
+                 move |data: &mut [i16], _: &cpal::OutputCallbackInfo| {
+    
+                    // Заполняю буфер пустотой, чтобы если у нас закончились сэмплы,
+                    // а поток еще работает, то была тишина вместо неприятно треска
+                    for sample in data.iter_mut() {
+                        *sample = cpal::Sample::EQUILIBRIUM;
+                    }
+                    
+                    // Если получили сообщение, то                     
+
+                    // 'outer: for frame in data.chunks_mut(2) {
+                    //     for sample in frame.iter_mut() {
+                    //         if audio_clip.position < audio_clip.samples.len() {
+                    //             *sample = audio_clip.samples[audio_clip.position];                       
+                    //         } else {
+                    //             if audio_clip.is_looped {
+                    //                 // мы проиграли весь аудио файл и сбрасываем позицию воспроизведения 
+                    //                 // в ноль, чтобы начать воспроизведение с начала
+                    //                 audio_clip.position = 0;            
+                    //             } else {
+                    //                 break 'outer;
+                    //             }
+                    //         }
+                    //     }                    
+                    //     audio_clip.position += 1;
+                    //}                
+                },
+                err_fn, None
+            )
+            .unwrap();
+    
+        stream.play().unwrap(); 
+        Ok(())
+    }
+
 }
